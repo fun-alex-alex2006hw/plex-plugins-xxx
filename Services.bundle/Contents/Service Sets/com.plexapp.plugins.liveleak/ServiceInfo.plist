@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>URL</key>
+	<dict>
+		<key>LiveLeak</key>
+		<dict>
+			<key>TestURLs</key>
+			<array>
+				<string>http://www.liveleak.com/view?i=e3e_1318292212</string>
+				<string>http://www.liveleak.com/view?i=8eb_1318290493</string>
+			</array>
+			<key>URLPatterns</key>
+			<array>
+				<string>^https?://www.liveleak.com/view\?i=.+</string>
+				<string>^https?://www.liveleak.com/ll_embed\?f=.+</string>
+			</array>
+		</dict>
+	</dict>
+</dict>
+</plist>

@@ -1,0 +1,126 @@
+#!/usr/bin/env python
+
+"""ClipHunter Service Code"""
+
+####################################################################################################
+def NormalizeURL(url):
+    """This function should return a 'normalised' version of the given URL. Plex uses the URL"""
+
+    if '#' in url:
+        return url.split('#')[0]
+
+    return url
+
+####################################################################################################
+def MetadataObjectForURL(url):
+    """
+    This function should create and return a metadata object (for example, a VideoClipOb-
+    ject) and populate it with metadata from the given URL. Only the metadata should be
+    added here - the object's key and rating_key properties will be synthesised based on the URL.
+    """
+
+    html = HTML.ElementFromURL(url)
+
+    title = html.xpath('//meta[@name="twitter:description"]')[0].get('content').strip()
+    for node in html.xpath('//script'):
+        node_text = node.text_content()
+        if 'mediaTitle' in node_text:
+            title = Regex('var\ mediaTitle\ =\ (.+?);').search(node_text).group(1).lstrip('\'\"').rstrip('\'\"')
+            break
+
+    summary = html.xpath('//meta[@name="description"]')[0].get('content').split(' - porn videos at')[0].strip()
+
+    dur_reg = Regex('Length:\ (\d+)\:(\d+)\ \-').search(summary)
+    duration = (int(dur_reg.group(1)) * 60000) + (int(dur_reg.group(2)) * 1000)
+
+    thumb = html.xpath('//meta[@name="twitter:image"]')[0].get('content').strip()
+    timestamp = int(Datetime.TimestampFromDatetime(Datetime.Now()))
+    art = '/:/plugins/com.plexapp.plugins.cliphunter/resources/art-default-ch.jpg?t=%i' %timestamp
+
+    vco = VideoClipObject(
+        title=title,
+        summary=summary,
+        duration=duration,
+        content_rating='X',
+        thumb=thumb,
+        art=art
+        )
+
+    return vco
+
+####################################################################################################
+def MediaObjectsForURL(url):
+    """
+    This function should create and return a list of media objects and part objects representing
+    the media available at the given URL. Callbacks may be used if obtaining the final media
+    location requires additional computation.
+    """
+
+    html = HTML.ElementFromURL(url)
+
+    mo = []
+    fmt_list = []
+
+    for node in html.xpath('//script'):
+        node_text = node.text_content()
+        if 'mediaId' in node_text:
+            data = JSON.ObjectFromString(Regex('var\ gexoFiles\ =\ ({.+?});').search(node_text).group(1))
+
+            for format_id, f in data.items():
+                video_url = f.get('url')
+                if not video_url:
+                    continue
+
+                height = f.get('h')
+                fmt = f.get('fmt')
+                bitrate = f.get('br')
+                fmt_list.append((height, bitrate, fmt, String.Encode(video_url)))
+            break
+
+    for (h, b, f, u) in reversed(sorted(fmt_list)):
+        f_lower = f.lower()
+
+        if 'flv' in f_lower:
+            container = Container.FLV
+        else:
+            container = Container.MP4
+
+        mo.append(MediaObject(
+            parts=[PartObject(key=Callback(PlayVideo, url=u, height=h))],
+            video_resolution=h,
+            bitrate=int(b),
+            container=container,
+            video_codec=VideoCodec.H264,
+            audio_codec=AudioCodec.AAC,
+            audio_channels=2,
+            optimized_for_streaming=True
+            ))
+
+    if not mo:
+        raise Ex.MediaNotAvailable
+    else:
+        return mo
+
+####################################################################################################
+def decode_video_url(s):
+    translation_table = {
+        'a': 'h', 'd': 'e', 'e': 'v', 'f': 'o', 'g': 'f', 'i': 'd', 'l': 'n',
+        'm': 'a', 'n': 'm', 'p': 'u', 'q': 't', 'r': 's', 'v': 'p', 'x': 'r',
+        'y': 'l', 'z': 'i',
+        '$': ':', '&': '.', '(': '=', '^': '&', '=': '/',
+        }
+
+    return ''.join(translation_table.get(c, c) for c in list(s))
+
+####################################################################################################
+def PlayVideo(url, height, **kwargs):
+    """Format the video url depending of version"""
+
+    video_url = decode_video_url(String.Decode(url))
+    Log.Debug('*' * 80)
+    Log.Debug('* PlayVideo url = %s' %video_url)
+    Log.Debug('*' * 80)
+    if not video_url:
+        raise Ex.MediaNotAvailable
+    else:
+        return Redirect(video_url)

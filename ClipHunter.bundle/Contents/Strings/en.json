@@ -1,0 +1,10 @@
+{
+  "ch_title": "ClipHunter",
+  "ph_title": "PicHunter",
+
+  "updater.success": "Success",
+  "updater.error": "Error",
+  "updater.update_available": "Update available: %s",
+  "updater.install": "Install latest version of the channel.",
+  "updater.updated": "Channel updated to version %s"
+}

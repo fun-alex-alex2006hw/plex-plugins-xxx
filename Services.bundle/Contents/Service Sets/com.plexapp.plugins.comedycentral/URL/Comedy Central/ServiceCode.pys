@@ -1,0 +1,140 @@
+META_URL = 'http://media.mtvnservices.com/pmt/e1/access/index.html?uri=%s&configtype=edge'
+MEDIA_URL = 'http://media-utils.mtvnservices.com/services/MediaGenerator/%s?device=iPad&format=json'
+URI = 'mgid:arc:%s:comedycentral.com:%s'
+
+RE_ID = Regex('ccnetworkapp\/(?P<type>episode|video)\/(?P<uuid>[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})')
+RE_MANIFEST = Regex('var triforceManifestFeed = (.+?);', Regex.DOTALL)
+RE_B = Regex('(&__b__=)\d+')
+
+####################################################################################################
+def NormalizeURL(url):
+
+	return url.split('?')[0]
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	json_obj = JSON.ObjectFromURL(META_URL % (GetURI(url)), cacheTime=CACHE_1HOUR, headers={'Referer': url})['feed']
+
+	# Check for geoblocks or errors
+	if not 'items' in json_obj:
+
+		if 'errorSlateURL' in json_obj and 'video_loc_' in json_obj['errorSlateURL']:
+			Log('Media Geoblocked')
+			raise Ex.MediaGeoblocked
+		else:
+			Log('Media Not Available')
+			raise Ex.MediaNotAvailable
+
+	duration = 0
+
+	for item in json_obj['items']:
+		duration += item['duration']
+
+	return VideoClipObject(
+		title = json_obj['title'],
+		summary = json_obj['description'],
+		duration = int(duration * 1000),
+		thumb = Resource.ContentsOfURLWithFallback(url=json_obj['image']['url'].split('?')[0]),
+		originally_available_at = Datetime.ParseDate(json_obj['items'][0]['pubDate'])
+	)
+
+####################################################################################################
+@deferred
+def MediaObjectsForURL(url):
+
+	json_obj = JSON.ObjectFromURL(META_URL % (GetURI(url)), cacheTime=CACHE_1HOUR, headers={'Referer': url})['feed']
+	available_streams = {}
+
+	# Check for geoblocks or errors
+	if not 'items' in json_obj:
+
+		if 'errorSlateURL' in json_obj and 'video_loc_' in json_obj['errorSlateURL']:
+			Log('Media Geoblocked')
+			raise Ex.MediaGeoblocked
+		else:
+			Log('Media Not Available')
+			raise Ex.MediaNotAvailable
+
+	for item in json_obj['items']:
+
+		if item['duration'] < 8:
+			continue
+
+		json_obj = JSON.ObjectFromURL(MEDIA_URL % (item['guid']), cacheTime=CACHE_1HOUR)
+
+		if not 'rendition' in json_obj['package']['video']['item'][0]:
+			continue
+
+		for rendition in json_obj['package']['video']['item'][0]['rendition']:
+
+			bitrate = str(int(round(int(rendition['rdmaxkbps']), -2)))
+			hls_url = RE_B.sub(r'\g<1>%s' % (bitrate), rendition['src'])
+
+			if bitrate not in available_streams:
+				available_streams[bitrate] = []
+
+			part = {}
+			part['hls_url'] = hls_url
+			part['duration'] = rendition['duration']
+
+			available_streams[bitrate].append(part)
+
+	media_objects = []
+	bitrates = [int(i) for i in available_streams.keys()]
+	bitrates.sort(reverse=True)
+
+	for bitrate in bitrates:
+
+		parts = []
+
+		for part in available_streams[str(bitrate)]:
+
+			parts.append(
+				PartObject(
+					key = HTTPLiveStreamURL(
+						url = part['hls_url']
+					),
+					duration = int(part['duration'])*1000
+				)
+			)
+
+		media_objects.append(
+			MediaObject(
+				parts = parts,
+				bitrate = bitrate,
+				video_resolution = 720,
+				audio_channels = 2
+			)
+		)
+
+	return media_objects
+
+####################################################################################################
+def GetURI(url):
+
+	try:
+		page = HTTP.Request(url, cacheTime=CACHE_1HOUR).content
+	except Ex.HTTPError, e:
+		if e.code == 404:
+			Log('HTTP 404 Not Found for URL: %s' % url)
+			raise Ex.MediaNotAvailable
+		else:
+			raise Ex.MediaNotAvailable
+	except:
+		raise Ex.MediaNotAvailable
+
+	re_result = RE_ID.search(page)
+
+	if not re_result:
+		Log('RE_ID regex failed')
+		try: 
+			json = JSON.ObjectFromString(RE_MANIFEST.search(page).group(1))
+			uuid = json['manifest']['reporting']['itemId']
+			type = json['manifest']['pageClass'].split('-')[1].split('playerpage')[0]
+			uri = URI % (type, uuid)
+		except: raise Ex.MediaNotAvailable
+	else:
+		uri = URI % (re_result.group('type'), re_result.group('uuid'))
+
+	return uri

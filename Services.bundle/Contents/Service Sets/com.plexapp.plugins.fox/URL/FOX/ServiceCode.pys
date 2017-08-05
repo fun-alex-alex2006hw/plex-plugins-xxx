@@ -1,0 +1,96 @@
+RE_KEY_URI = Regex('URI *= *"(.*)"')
+USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_2) AppleWebKit/600.3.18 (KHTML, like Gecko) Version/8.0.3 Safari/600.3.18'
+
+SERIES_URL = 'aHR0cDovL2ZlZWQudGhlcGxhdGZvcm0uY29tL2YvZm94LmNvbS9tZXRhZGF0YT9jb3VudD10cnVlJmJ5Q3VzdG9tVmFsdWU9e2Z1bGxFcGlzb2RlfXt0cnVlfSZieUNhdGVnb3JpZXM9U2VyaWVzLyVz'
+
+RE_B = Regex('(__b__=)\d+')
+
+##########################################################################################
+def MetadataObjectForURL(url):
+
+    try:
+        html = HTML.ElementFromURL(url)
+    except:
+        raise Ex.MediaNotAvailable
+
+    try:
+        data = html.xpath("//script[@type='application/ld+json']/text()")[0]
+        json = JSON.ObjectFromString(data)
+    except:
+        raise Ex.MediaNotAvailable
+
+    title = json['name']
+    summary = json['description']
+    thumb = json['image'] if 'image' in json else None
+    index = int(json['episodeNumber']) if json['episodeNumber'] is not None else None
+    show = json['partOfSeries']['name']
+    season = int(json['partOfSeason']['seasonNumber']) if json['partOfSeason']['seasonNumber'] is not None else None
+    originally_available_at = Datetime.ParseDate(json['releasedEvent']['startDate'])
+
+    return EpisodeObject(
+        title = title,
+        summary = summary,
+        thumb = thumb,
+        index = index,
+        show = show,
+        season = season,
+        originally_available_at = originally_available_at
+    )
+
+###########################################################################################
+def MediaObjectsForURL(url):
+
+    return [
+        MediaObject(
+            audio_channels = 2,
+            optimized_for_streaming = True,
+            parts = [
+                PartObject(
+                    key = HTTPLiveStreamURL(Callback(PlayVideo, url=url))
+                )
+            ]
+        )
+    ]
+
+##########################################################################################
+@indirect
+def PlayVideo(url, **kwargs):
+
+    try:
+        html = HTML.ElementFromURL(url)
+    except:
+        raise Ex.MediaNotAvailable
+
+    data = html.xpath("//script[@type='application/ld+json']/text()")
+
+    if len(data) < 1:
+        raise Ex.MediaNotAvailable
+
+    json = JSON.ObjectFromString(data[0])
+
+    episode_id = json['@id']
+    show = json['partOfSeries']['name']
+
+    json_url = String.Decode(SERIES_URL) % String.Quote(show)
+    json_data = JSON.ObjectFromURL(url = json_url)
+
+    for episode in json_data['results']:
+        if str(episode_id) != str(episode['id']):
+            continue
+
+        data = HTML.ElementFromURL(url = episode['videoURL'] + '&manifest=m3u')
+        video_url = data.xpath("//video/@src")
+
+        if len(video_url) < 1:
+            exception = data.xpath("//param[@name='exception']/@value")
+
+            if len(exception) < 1:
+                raise Ex.MediaNotAvailable
+            elif exception[0] == 'GeoLocationBlocked':
+                raise Ex.MediaGeoblocked
+            else:
+                raise Ex.MediaNotAvailable
+
+    video_url = RE_B.sub(r'\g<1>4000', video_url[0])
+
+    return IndirectResponse(VideoClipObject, key=HTTPLiveStreamURL(url=video_url))

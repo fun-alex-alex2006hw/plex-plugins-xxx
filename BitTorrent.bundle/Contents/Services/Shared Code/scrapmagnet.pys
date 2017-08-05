@@ -1,0 +1,111 @@
+###############################################################################
+import base64
+import common
+import platform
+import os
+import re
+import stat
+import socket
+import subprocess
+import time
+import utils
+
+###############################################################################
+RE_MAGNET_INFO_HASH = re.compile('xt=urn:btih:([a-zA-Z0-9]+)')
+MIXPANEL_TOKEN      = '63b4a20135a998db7eef5bbca5743df6'
+THREAD_CREATE       = None
+
+###############################################################################
+def log_thread_func(process):
+    Log.Info('Log thread starting')
+    line = process.stdout.readline()
+    while line:
+        Log.Info(line.rstrip())
+        line = process.stdout.readline()
+    Log.Info('Log thread stopping')
+
+###############################################################################
+def start():
+    try:
+        os.chmod(get_exec_path(), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+    except Exception as exception:
+        Log.Error('Failed set scrapmagnet permissions: {0}'.format(repr(exception)))
+
+    mixpanel_data = { 'Channel Version': common.VERSION }
+    mixpanel_data = JSON.StringFromObject(mixpanel_data)
+    mixpanel_data = base64.b64encode(mixpanel_data)
+
+    command =   [
+                    get_exec_path(),
+                    '--ppid', str(os.getpid()),
+                    '--port', str(common.HTTP_PORT),
+                    '--inactivity-pause-timeout', Prefs['TORRENT_INACTIVITY_PAUSE_TIMEOUT'],
+                    '--inactivity-remove-timeout', Prefs['TORRENT_INACTIVITY_REMOVE_TIMEOUT'],
+                    '--mixpanel-token', MIXPANEL_TOKEN,
+                    '--mixpanel-data', mixpanel_data,
+                ]
+
+    if Prefs['KEEP_FILES']:
+        command.append('--keep')
+
+    Log.Info('Starting scrapmagnet')
+    Log.Info(' '.join(command))
+
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        global THREAD_CREATE
+        if THREAD_CREATE:
+            THREAD_CREATE(log_thread_func, process=process)
+
+    except Exception as exception:
+        Log.Error('Failed to start scrapmagnet: {0}'.format(repr(exception)))
+
+###############################################################################
+def is_running():
+    try:
+        JSON.ObjectFromURL(get_url(''), cacheTime=0, timeout=10)
+        return True
+    except Exception as exception:
+        Log.Error('Server unreachable: {0}'.format(repr(exception)))
+
+    return False
+
+###############################################################################
+def stop():
+    try:
+        Log.Info('Stopping scrapmagnet')
+        HTML.ElementFromURL(get_url('shutdown'), cacheTime=0, timeout=10)
+        while is_running():
+            time.sleep(100)
+    except:
+        pass
+
+###############################################################################
+def get_bin_dir():
+    bundle_directory = os.path.join(os.getcwd(), '..', '..', '..', 'Plug-ins', 'BitTorrent.bundle')
+    bundle_directory = bundle_directory.replace('\\\\?\\', '')
+    return os.path.normpath(os.path.join(bundle_directory, 'Contents', 'Bin'))
+
+###############################################################################
+def get_exec_path():
+    if Platform.OS == 'MacOSX':
+        return os.path.join(get_bin_dir(), 'darwin_amd64', 'scrapmagnet')
+    elif Platform.OS == 'Linux':
+        if Prefs['SCRAPMAGNET_VERSION'] != 'Auto':
+            architecture = Prefs['SCRAPMAGNET_VERSION']
+        else:
+            architecture = platform.architecture()[0]
+        if architecture == '64bit':
+            return os.path.join(get_bin_dir(), 'linux_amd64', 'scrapmagnet')
+        elif architecture == '32bit':
+            return os.path.join(get_bin_dir(), 'linux_386', 'scrapmagnet')
+    elif Platform.OS == 'Windows':
+        return os.path.join(get_bin_dir(), 'windows_386', 'scrapmagnet.exe')
+
+    Log.Error('Unsupported OS: {0}'.format(Platform.OS))
+
+###############################################################################
+def get_url(page):
+    local_host = utils.get_local_host()
+    return 'http://{0}:{1}/{2}'.format(local_host, common.HTTP_PORT, page)

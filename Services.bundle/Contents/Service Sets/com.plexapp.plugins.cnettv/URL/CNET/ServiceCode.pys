@@ -1,0 +1,90 @@
+####################################################################################################
+def NormalizeURL(url):
+
+	return url.split('#')[0].split('?')[0]
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	html = HTML.ElementFromURL(url)
+
+	title = html.xpath('//meta[@itemprop="name"]/@content')[0]
+	summary = html.xpath('//meta[@itemprop="description"]/@content')[0]
+
+	try:
+		originally_available_at = html.xpath('//meta[@itemprop="uploadDate"]/@content')[0].split('UTC')[0]
+		originally_available_at = Datetime.ParseDate(originally_available_at).date()
+	except:
+		originally_available_at = None
+
+	thumb = html.xpath('//meta[@itemprop="thumbnailUrl"]/@content')[0]
+
+	duration = html.xpath('//meta[@itemprop="duration"]/@content')[0]
+
+	if ':' in duration:
+		duration = Datetime.MillisecondsFromString(duration.split('+')[0])
+	else:
+		duration = int(duration) * 1000
+
+	return VideoClipObject(
+		title = title,
+		summary = summary,
+		originally_available_at = originally_available_at,
+		duration = duration,
+		thumb = Resource.ContentsOfURLWithFallback(url=thumb)
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	return [
+		MediaObject(
+			parts = [
+				PartObject(key=HTTPLiveStreamURL(Callback(PlayVideo, url=url, resolution=resolution)))
+			],
+			video_resolution = resolution,
+			audio_channels = 2,
+			optimized_for_streaming = True
+		) for resolution in ['1080', '720', '360']
+	]
+
+####################################################################################################
+@indirect
+def PlayVideo(url, resolution='1080', **kwargs):
+
+	json_obj = GetJSON(url)
+	m3u8_master_url = json_obj['m3u8']
+
+	if m3u8_master_url.startswith('/'):
+		m3u8_master_url = 'https://www.cnet.com' + m3u8_master_url
+
+	m3u8_master_url = m3u8_master_url + '?device=ott&change-to-host=cnetmedia-a.akamaihd.net'
+
+	m3u8_master = HTTP.Request(m3u8_master_url).content
+	resolution_regex = 'x%s.+?(https?:\/\/.+?\.m3u8)' % (resolution)
+	video_url = Regex(resolution_regex, Regex.DOTALL).search(m3u8_master)
+
+	if video_url:
+		return IndirectResponse(VideoClipObject, key=video_url.group(1))
+
+	raise Ex.MediaNotAvailable
+
+####################################################################################################
+def GetJSON(url):
+
+	html = HTML.ElementFromURL(url)
+	json = html.xpath('//div[@class="videoPlayer"]/@data-cnet-video-options')
+
+	if len(json) < 1:
+		raise Ex.MediaNotAvailable
+
+	json_obj = JSON.ObjectFromString(json[0])
+
+	if 'video' in json_obj and json_obj['video'] is not None:
+		json_obj = json_obj['video']
+	elif 'videos' in json_obj and json_obj['videos'] is not None:
+		json_obj = json_obj['videos'][0]
+	else:
+		raise Ex.MediaNotAvailable
+
+	return json_obj

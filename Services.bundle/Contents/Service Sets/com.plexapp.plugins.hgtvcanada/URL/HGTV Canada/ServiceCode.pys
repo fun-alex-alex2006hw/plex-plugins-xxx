@@ -1,0 +1,133 @@
+'''
+
+VIDEO PAGE: 
+http://www.hgtv.ca/shows/timber-kings/videos/under-the-gun-889567299613/
+
+EPISODE DETAILS FROM VIDEO ID:
+http://feed.theplatform.com/f/dtjsEC/EAlt6FfQ_kCX/889567299613
+
+SMIL RESULT: JSON[content][0][url]
+http://link.theplatform.com/s/dtjsEC/llc2KZ4_kdUm?manifest=f4m&feed=HGTV%20Main%20Feed&mbr=true
+
+VIDEO URL:
+https://hgtv-vh.akamaihd.net/i/371/1019/HGTV_HawaiiLife_E803.mp4,,.csmil/master.m3u8?hdnea=ip=XXX.XXX.XXX.XXX~st=1489967777~exp=1489968377~acl=/i/371/1019/HGTV_HawaiiLife_E803.mp4*~id=c5ad9d90-ba54-4b0d-bc1e-27d7fc90a2ea~hmac=d4fdd5da2323f9a1e519d398c32e9925cf88d302c29055bc0f5c2dd4590a7cbc
+
+'''
+import urllib2_new
+
+FEED_ROOT_URL = 'http://feed.theplatform.com/f/dtjsEC/EAlt6FfQ_kCX/'
+
+
+#########################################################################################
+def NormalizeURL(url):
+    return url.rstrip('/')
+
+
+#########################################################################################
+def MetadataObjectForURL(url):
+
+    pid = GetPID(url)
+
+    Log.Debug('* Episode PID: {}'.format(pid))
+
+    if not pid:
+        raise Ex.MediaNotAvailable
+
+    data = JSON.ObjectFromURL(FEED_ROOT_URL + pid)
+    entry = data
+
+    title = entry['title']
+    summary = entry['description'] if 'description' in entry else None
+    thumb = entry['thumbnails'][0]['url'] if 'thumbnails' in entry else None
+    show = entry['pl1$show'] if 'pl1$show' in entry else None
+    season = int(entry['pl1$season']) if 'pl1$season' in entry and entry['pl1$season'] != "Special" else None
+    index = int(entry['pl1$episode']) if 'pl1$episode' in entry else None
+    originally_available_at = Datetime.FromTimestamp(entry['pubDate'] / 1000).date() if 'pubDate' in entry else None
+
+    duration = None
+
+    if 'content' in entry:
+
+        if 'duration' in entry['content'][0]:
+            duration = int(float(entry['content'][0]['duration']) * 1000)
+
+    if show and season and index:
+
+        return EpisodeObject(
+            title = title,
+            summary = summary,
+            thumb = thumb,
+            show = show,
+            season = season,
+            index = index,
+            originally_available_at = originally_available_at,
+            duration = duration
+        )
+
+    else:
+
+        return VideoClipObject(
+            title = title,
+            summary = summary,
+            thumb = thumb,
+            originally_available_at = originally_available_at,
+            duration = duration
+        )
+    
+#########################################################################################
+@deferred
+def MediaObjectsForURL(url):
+
+    pid = GetPID(url)
+
+    if not pid:
+        raise Ex.MediaNotAvailable
+
+    Log.Debug('* Media Object Step 1 URL: {}'.format(FEED_ROOT_URL + pid))
+
+    data = JSON.ObjectFromURL(FEED_ROOT_URL + pid)
+    entry = data
+
+    for item in entry['content']:
+
+        if not 'f4m' in item['url']:
+            continue
+
+        Log.Debug('* Media Object Step 2 URL: {}'.format(item['url'].replace('f4m', 'm3u')  + '&switch=http'))
+
+        data = HTML.ElementFromURL(item['url'].replace('f4m', 'm3u'))
+
+        try:
+            video_url = data.xpath('//video/@src')[0]
+        except:
+            if 'GeoLocationBlocked' in HTML.StringFromElement(data):
+                raise Ex.MediaGeoblocked
+
+        # Fix some videos that fail due to spaces in the URLs
+        video_url = video_url.replace(' ', '%20')
+
+        Log.Debug('* Media Object Step 3 URL: {}'.format(video_url))
+
+        return [
+            MediaObject(
+                video_resolution = int(item['height']),
+                audio_channels = int(item['audioChannels']),
+                bitrate = int(item['bitrate'] / 100),
+                duration = int(item['duration'] * 1000),
+                video_frame_rate = int(item['frameRate']),
+                parts = [
+                    PartObject(key=HTTPLiveStreamURL(Callback(PlayVideo, url=video_url)))
+                ]
+            )
+        ]
+
+##########################################################################################
+def PlayVideo(url, **kwargs):
+
+    playlist = HTTP.Request(url).content
+    return playlist
+
+##########################################################################################
+def GetPID(url):
+    return url.rsplit('-', 1)[1]
+

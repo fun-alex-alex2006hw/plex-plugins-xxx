@@ -1,0 +1,187 @@
+API_BASE_URL = String.Decode('aHR0cDovL3BsYXlhcGkubXRneC50di92My8=')
+VIDEO_STREAM_URL = API_BASE_URL + 'videos/stream/%s'
+VIDEO_DETAILS_URL = API_BASE_URL + 'videos/%s'
+
+RE_ID_URL = Regex('\d+')
+RE_ID_IMAGE = Regex('\/(\d+)\/')
+
+####################################################################################################
+def MetadataObjectForURL(url): 
+    # Determine id of episode
+    id = FindVideoID(url)
+        
+    try: 
+        video = JSON.ObjectFromURL(VIDEO_DETAILS_URL % id)
+    except:
+        raise Ex.MediaNotAvailable
+    
+    try:
+        title = unicode(video['title'])
+    except:
+        raise Ex.MediaNotAvailable
+        
+    try:
+        summary = unicode(video['summary'])
+    except:
+        summary = None
+        
+    try:
+        show = unicode(video['format_title'])
+    except:
+        show = None
+        
+    try:
+        art = video['_embedded']['season']['_links']['image']['href'].replace("{size}", "994x560")
+    except:
+        art = None
+        
+    try:
+        thumb = video['_links']['image']['href'].replace("{size}", "497x280")
+    except:
+        thumb = None
+        
+    try:
+        originally_available_at = Datetime.ParseDate(video['publish_at'].split("T")[0]).date()
+    except:
+        originally_available_at = None
+        
+    try:
+        duration = int(video['duration']) * 1000
+    except:
+        duration = None
+        
+    try:
+        season = int(video['format_position']['season'])
+    except:
+        season = None
+        
+    try:
+        index = int(video['format_position']['episode'])
+    except:
+        index = None  
+    
+    return EpisodeObject(
+        title = title,
+        summary = summary,
+        show = show,
+        art = art,
+        thumb = thumb,
+        originally_available_at = originally_available_at,
+        duration = duration,
+        season = season,
+        index = index
+    )
+
+####################################################################################################
+def MediaObjectsForURL(url):
+    return [
+        MediaObject(
+            video_resolution        = 576,
+            audio_channels          = 2,
+            optimized_for_streaming = True,
+            parts                   = [
+                PartObject(
+                    key = HTTPLiveStreamURL(Callback(PlayVideo, url = url))
+                )
+            ]
+        )
+    ]
+
+####################################################################################################
+@indirect
+def PlayVideo(url, **kwargs):
+    # Determine id of episode
+    id = FindVideoID(url)
+
+    try: 
+        data = JSON.ObjectFromURL(VIDEO_STREAM_URL % id)
+    except:
+        raise Ex.MediaGeoblocked
+            
+    return IndirectResponse(
+        VideoClipObject,
+        key = HTTPLiveStreamURL(GetClientDependentURL(data['streams']['hls']))
+    )
+
+###########################################################
+def GetClientDependentURL(url):
+    if Client.Platform in ['MacOSX', 'Windows', None] and '.m3u8' in url:
+        streams = GetHLSStreams(url)
+    
+        # Return highest bitrate url since PMC can't handle HLS correctly
+        # Also consider a client not identifying itself as needing help,
+        # the Samsung client is one of those.
+        maxBitrateURL = streams[0]['url']
+        
+        if not '?' in maxBitrateURL:
+            # Samsung requires an arbitrary parameter in the stream url since
+            # '&' is always appended by that client ...
+            maxBitrateURL = maxBitrateURL + '?a=1'
+        
+        return maxBitrateURL
+    else:
+        # Other clients can handle HLS correctly
+        return url 
+
+###########################################################
+def GetHLSStreams(url):
+    streams = []
+
+    playList = HTTP.Request(url).content
+
+    # Parse the m3u8 file to get:
+    # - URL
+    # - Resolution
+    # - Bitrate
+    for line in playList.splitlines():
+        if "TYPE=SUBTITLES" in line:
+            continue
+        if "BANDWIDTH" in line:
+            stream            = {}
+            stream["bitrate"] = int(Regex('(?<=BANDWIDTH=)[0-9]+').search(line).group(0))        
+
+            if "RESOLUTION" in line:
+                stream["resolution"] = int(Regex('(?<=RESOLUTION=)[0-9]+x[0-9]+').search(line).group(0).split("x")[1])
+            else:
+                stream["resolution"] = 0
+
+        elif ".m3u8" in line:
+            path = ''
+            
+            if not line.startswith("http"):
+                path = url[ : url.rfind('/') + 1]
+                
+            stream["url"] = path + line
+                    
+            streams.append(stream)
+                
+    sorted_streams = sorted(streams, key = lambda stream: stream["bitrate"], reverse = True)        
+
+    return sorted_streams
+
+####################################################################################################
+def FindVideoID(url):
+    # Try to find video id via URL
+    try:
+        if '?id=' in url:
+            split = url.split('=')
+        else:
+            split = url.split('/')
+        
+        id  = RE_ID_URL.findall(split[-1])[0]
+        return id
+    except:
+        pass
+        
+    # Try to find video via html
+    try:
+        element = HTML.ElementFromURL(url)
+        image_url = element.xpath("//meta[@property='og:image']/@content")[0]
+        id = RE_ID_IMG.search(image_url).groups()[0]
+    except:
+        raise Ex.MediaNotAvailable
+
+    return id
+    
+ 
+

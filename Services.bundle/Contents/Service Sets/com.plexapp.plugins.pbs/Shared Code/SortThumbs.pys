@@ -1,0 +1,15 @@
+def SortThumbs(thumbs):
+  ''' take a list of JSON thumbnail objects and return the most appropriate for our usage'''
+  # we are looking for the usage_type of "program-mezzanine-16x9" (programs) or "Mezzanine" (videos)
+  best = ''
+  try:
+    for t in thumbs:
+      if t['type']['usage_type'] == "program-mezzanine-16x9" or t['type']['usage_type'] == "Mezzanine":
+        best = t['url']
+  except:
+    # sometimes we get no associated_images so fallback to nothing (and then let fallback handle it in channel code)
+    best = ''
+  # NB:  In the future we can resize/crop these on the fly with their new API, called ITS
+  # https://projects.pbs.org/confluence/display/ITS/How+to+Transform+Images+in+ITS
+  # for now I think we're ok to just take the best quality and let the PMS or client deal with it
+  return best

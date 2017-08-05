@@ -1,0 +1,45 @@
+[
+    {
+        "id":       "SCRAPYARD_URL",
+        "label":    "Scrapyard server URL",
+        "type":     "text",
+        "default":  "http://scrapyard.en-mousse.org"
+    },
+    {
+        "id":       "SCRAPMAGNET_VERSION",
+        "label":    "Scrapmagnet version",
+        "type":     "enum",
+        "values":   ["Auto", "32bit", "64bit"],
+        "default":  "Auto"
+    },
+    {
+        "id":       "KEEP_FILES",
+        "label":    "Keep files after exiting",
+        "type":     "bool",
+        "default":  "false"
+    },
+    {
+        "id":       "TORRENT_INACTIVITY_PAUSE_TIMEOUT",
+        "label":    "Torrent inactivity pause timeout (in s)",
+        "type":     "text",
+        "default":  "10"
+    },
+    {
+        "id":       "TORRENT_INACTIVITY_REMOVE_TIMEOUT",
+        "label":    "Torrent inactivity remove timeout (in s)",
+        "type":     "text",
+        "default":  "20"
+    },
+    {
+        "id":       "MOVIES_DOWNLOAD_DIR",
+        "label":    "Movies download directory",
+        "type":     "text",
+        "default":  "."
+    },
+    {
+        "id":       "TVSHOWS_DOWNLOAD_DIR",
+        "label":    "TV Shows download directory",
+        "type":     "text",
+        "default":  "."
+    },
+]
